@@ -49,7 +49,7 @@ class Cleanups():
         self.listeners.remove(listener)
 
     @classmethod
-    def add_global_listener(self, listener):
+    def add_global_listener(cls, listener):
         with cls.global_lock:
             cls.global_listeners.append(listener)
 
@@ -101,7 +101,7 @@ class Cleanups():
     def __enter__(self):
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb)
+    def __exit__(self, exc_type, exc_val, exc_tb):
         self.run()
 
     def _new_cleanup(self, func, args, kwargs):
@@ -121,7 +121,7 @@ class Cleanup():
         self.name = None
 
     def run(self):
-        return self.func(*self.args, *self.kwargs)
+        return self.func(*self.args, **self.kwargs)
 
     def __str__(self):
         name = self.name
