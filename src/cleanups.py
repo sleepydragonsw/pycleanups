@@ -1,3 +1,10 @@
+__all__ = (
+    "Cleanup",
+    "Cleanups",
+    "CleanupListener",
+    "DebugCleanupListener",
+)
+
 import atexit
 import os
 import shutil
@@ -5,12 +12,7 @@ import threading
 import traceback
 import sys
 
-__all__ = (
-    "Cleanup",
-    "Cleanups",
-    "CleanupListener",
-    "DebugCleanupListener",
-)
+################################################################################
 
 class Cleanups():
 
@@ -27,7 +29,7 @@ class Cleanups():
     def add(self, func, *args, **kwargs):
         with self.lock:
             cleanup = self._new_cleanup(func, args, kwargs)
-            self.cleanups.append(cleanup) # append() is atomic so no need to acquire self.lock
+            self.cleanups.append(cleanup)
         return cleanup
 
     def add_to_front(self, func, *args, **kwargs):
@@ -111,6 +113,8 @@ class Cleanups():
 
 Cleanups.instance = Cleanups()
 
+################################################################################
+
 class Cleanup():
 
     def __init__(self, id, func, args, kwargs):
@@ -132,16 +136,73 @@ class Cleanup():
 
     __call__ = run
 
+################################################################################
+
 class CleanupListener():
+    """
+    Listener that can be added to a `Cleanups` object to be notified of the
+    execution of cleanups. The implementation of every method in this class does
+    nothing, but subclasses may override these methods to respond to the events.
+    
+    Listeners are registered via the `Cleanups.add_listener()` and
+    `Cleanups.add_global_listener()` methods.  They can be unregistered with the
+    `Cleanups.remove_listener()` and `Cleanups.remove_global_listener()`
+    methods.  The callbacks occur in the `Cleanups.run()` method.
+    """
 
     def starting(self, cleanups, cleanup):
+        """
+        Invoked before a cleanup operation begins.
+        See `Cleanups.run()` for details.
+        
+        :Parameters:
+            cleanups : `Cleanups`
+                the `Cleanups` object that is executing the cleanup operation
+            cleanup : `Cleanup`
+                the `Cleanup` that is about to be executed
+        """
         pass
 
     def completed(self, cleanups, cleanup, retval):
+        """
+        Invoked after a cleanup completes successfully.
+        Only one of `completed()` or `failed()`, not both, is invoked for a
+        given cleanup execution.
+        See `Cleanups.run()` for details.
+        
+        :Parameters:
+            cleanups : `Cleanups`
+                the `Cleanups` object that executed the cleanup operation
+            cleanup : `Cleanup`
+                the `Cleanup` that was executed
+            retval :
+                the value that was returned from the cleanup's method
+        """
         pass
 
     def failed(self, cleanups, cleanup, exc_info):
+        """
+        Invoked after a cleanup completes unsuccessfully by raising an
+        exception.
+        Only one of `completed()` or `failed()`, not both, is invoked for a
+        given cleanup execution.
+        See `Cleanups.run()` for details.
+        
+        :Parameters:
+            cleanups : `Cleanups`
+                the `Cleanups` object that executed the cleanup operation
+            cleanup : `Cleanup`
+                the `Cleanup` that was executed
+            exc_info : tuple
+                the tuple ``(type, value, traceback)`` as returned from
+                ``sys.exc_info()`` about the exception that was raised by the
+                cleanup; ensure to not retain references to this tuple or the
+                ``traceback`` element after this method completes to avoid
+                memory leaks
+        """
         pass
+
+################################################################################
 
 class DebugCleanupListener(CleanupListener):
 
@@ -152,7 +213,8 @@ class DebugCleanupListener(CleanupListener):
         self.log("Starting cleanup operation: %s" % cleanup)
 
     def completed(self, cleanups, cleanup, retval):
-        self.log("Cleanup operation completed successfully: %s (returned %r)" % (cleanup, retval))
+        self.log("Cleanup operation completed successfully: %s (returned %r)" %
+            (cleanup, retval))
 
     def failed(self, cleanups, cleanup, exc_info):
         self.log("Cleanup operation FAILED: %s (%s)" % (cleanup, exc_info[1]))
@@ -160,6 +222,8 @@ class DebugCleanupListener(CleanupListener):
 
     def log(self, message):
         print(message, file=self.f)
+
+################################################################################
 
 class CleanupListenerNotifier():
 
@@ -171,10 +235,12 @@ class CleanupListenerNotifier():
         return self.dispatch_notifications(CleanupListener.starting, cleanup)
 
     def completed(self, cleanup, retval):
-        return self.dispatch_notifications(CleanupListener.completed, cleanup, retval)
+        return self.dispatch_notifications(CleanupListener.completed, cleanup,
+            retval)
 
     def failed(self, cleanup, exc_info):
-        return self.dispatch_notifications(CleanupListener.failed, cleanup, exc_info)
+        return self.dispatch_notifications(CleanupListener.failed, cleanup,
+            exc_info)
 
     def dispatch_notifications(self, func, *args):
         for listener in self.listeners:
@@ -182,4 +248,3 @@ class CleanupListenerNotifier():
                 func(listener, self.cleanups, *args)
             except:
                 traceback.print_exc()
-
