@@ -5,6 +5,13 @@ import threading
 import traceback
 import sys
 
+__all__ = (
+    "Cleanup",
+    "Cleanups",
+    "CleanupListener",
+    "DebugCleanupListener",
+)
+
 class Cleanups():
 
     global_listeners = []
@@ -15,6 +22,7 @@ class Cleanups():
         self.listeners = []
         self.next_cleanup_id = 0
         self.lock = threading.Lock()
+        atexit.register(self.run)
 
     def add(self, func, *args, **kwargs):
         with self.lock:
@@ -68,7 +76,7 @@ class Cleanups():
             global_listeners = tuple(self.global_listeners)
 
         listeners = listeners + global_listeners
-        listeners = CleanupsListenerNotifier(self, listeners)
+        listeners = CleanupListenerNotifier(self, listeners)
 
         for cleanup in cleanups:
             listeners.starting(cleanup)
@@ -86,6 +94,9 @@ class Cleanups():
     def __len__(self):
         with self.lock:
             return len(self.cleanups)
+
+    def __call__(self, *args, **kwargs):
+        return self.run(*args, **kwargs)
 
     def __enter__(self):
         return self
@@ -121,7 +132,7 @@ class Cleanup():
 
     __call__ = run
 
-class CleanupsListener():
+class CleanupListener():
 
     def starting(self, cleanups, cleanup):
         pass
@@ -132,7 +143,7 @@ class CleanupsListener():
     def failed(self, cleanups, cleanup, exc_info):
         pass
 
-class DebugCleanupsListener(CleanupsListener):
+class DebugCleanupListener(CleanupListener):
 
     def __init__(self, f=None):
         self.f = f if f is not None else sys.__stderr__
@@ -150,20 +161,20 @@ class DebugCleanupsListener(CleanupsListener):
     def log(self, message):
         print(message, file=self.f)
 
-class CleanupsListenerNotifier():
+class CleanupListenerNotifier():
 
     def __init__(self, cleanups, listeners):
         self.cleanups = cleanups
         self.listeners = listeners
 
     def starting(self, cleanup):
-        return self.dispatch_notifications(CleanupsListener.starting, cleanup)
+        return self.dispatch_notifications(CleanupListener.starting, cleanup)
 
     def completed(self, cleanup, retval):
-        return self.dispatch_notifications(CleanupsListener.completed, cleanup, retval)
+        return self.dispatch_notifications(CleanupListener.completed, cleanup, retval)
 
     def failed(self, cleanup, exc_info):
-        return self.dispatch_notifications(CleanupsListener.failed, cleanup, exc_info)
+        return self.dispatch_notifications(CleanupListener.failed, cleanup, exc_info)
 
     def dispatch_notifications(self, func, *args):
         for listener in self.listeners:
