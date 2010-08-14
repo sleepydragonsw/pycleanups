@@ -69,25 +69,10 @@ class Cleanups():
             self.cleanups.clear()
 
     def run(self):
-        with self.lock:
-            cleanups = self.cleanups
-            self.cleanups = []
-            listeners = tuple(self.listeners)
-
-        with self.global_lock:
-            global_listeners = tuple(self.global_listeners)
-
-        listeners = listeners + global_listeners
-        listeners = CleanupListenerNotifier(self, listeners)
-
+        (cleanups, listeners) = self._get_cleanups_and_listeners_for_execution()
+        cleanups.reverse()
         for cleanup in cleanups:
-            listeners.starting(cleanup)
-            try:
-                retval = cleanup.run()
-            except:
-                listeners.failed(self, cleanup, sys.exc_info())
-            else:
-                listeners.completed(cleanup, retval)
+            self._execute_cleanup(cleanup, listeners)
 
     def __contains__(self, cleanup):
         with self.lock:
@@ -110,6 +95,29 @@ class Cleanups():
         # ASSERTION: thread must have acquired self.lock
         self.next_cleanup_id += 1
         return Cleanup(self.next_cleanup_id, func, args, kwargs)
+
+    def _get_cleanups_and_listeners_for_execution(self):
+        with self.lock:
+            cleanups = self.cleanups
+            self.cleanups = []
+            listeners = tuple(self.listeners)
+
+        with self.global_lock:
+            global_listeners = tuple(self.global_listeners)
+
+        listeners = global_listeners + listeners
+        listeners = _CleanupListenerNotifier(self, listeners)
+
+        return (cleanups, listeners)
+
+    def _execute_cleanup(self, cleanup, listeners):
+        listeners.starting(cleanup)
+        try:
+            retval = cleanup.run()
+        except:
+            listeners.failed(self, cleanup, sys.exc_info())
+        else:
+            listeners.completed(cleanup, retval)
 
 Cleanups.instance = Cleanups()
 
@@ -225,7 +233,7 @@ class DebugCleanupListener(CleanupListener):
 
 ################################################################################
 
-class CleanupListenerNotifier():
+class _CleanupListenerNotifier():
 
     def __init__(self, cleanups, listeners):
         self.cleanups = cleanups
@@ -248,3 +256,9 @@ class CleanupListenerNotifier():
                 func(listener, self.cleanups, *args)
             except:
                 traceback.print_exc()
+
+################################################################################
+
+add = Cleanups.instance.add
+add_to_front = Cleanups.instance.add_to_front
+remove = Cleanups.instance.remove
