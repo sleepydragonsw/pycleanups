@@ -1,5 +1,10 @@
-import cleanups
+import itertools
+import threading
 import unittest
+
+from cleanups import Cleanup
+from cleanups import Cleanups
+from cleanups import CleanupListener
 
 ################################################################################
 
@@ -7,7 +12,90 @@ class CleanupsTestCase(unittest.TestCase):
     """
     Base class for all test cases for the "cleanups" library.
     """
-    pass
+
+    def func(self, name, retval=None, exception=None):
+        """
+        A convenience function that simply creates a new instance of
+        `SampleCleanupOperation` with the given arguments.  The forcing of
+        ``name`` as the first parameter makes it easier to locate which test
+        failed based on the cleanup operation's name.
+        """
+        return SampleCleanupOperation(self, name=name, retval=retval,
+            exception=exception)
+
+################################################################################
+
+class TestBasicFunctionality(CleanupsTestCase):
+    """
+    A small suite of tests that exercise the basic functionality of the cleanups
+    API.  If any of these tests fail they should be treated as high priority
+    because it means that that API is crippled in some way.
+    """
+
+    def test_run_one(self):
+        func = self.func("Toronto")
+        x = Cleanups()
+        x.add(func)
+        x.run()
+        func.assertInvocation()
+
+    def test_run_multiple(self):
+        func1 = self.func("Kitchener")
+        func2 = self.func("Waterloo")
+        x = Cleanups()
+        x.add(func1)
+        x.add(func2)
+        x.run()
+        func1.assertInvocation()
+        func2.assertInvocation()
+        func2.assertInvokedBefore(func1)
+
+    def test_remove_one(self):
+        func = self.func("Cambridge")
+        x = Cleanups()
+        c1 = x.add(func)
+        x.remove(c1)
+        x.run()
+        func.assertNotInvoked()
+
+    def test_remove_multiple(self):
+        func1 = self.func("Guelph")
+        func2 = self.func("Hamilton")
+        func3 = self.func("Brantford")
+        x = Cleanups()
+        c1 = x.add(func1)
+        c2 = x.add(func2)
+        x.add(func3)
+        x.remove(c1)
+        x.remove(c2)
+        x.run()
+        func1.assertNotInvoked()
+        func2.assertNotInvoked()
+        func3.assertInvoked()
+
+    def test_args(self):
+        func1 = self.func("Preston")
+        func2 = self.func("Galt")
+        func3 = self.func("Hespler")
+        x = Cleanups()
+        x.add(func1, 1, 2, "3")
+        x.add(func2, key1="value1", key2=2)
+        x.add(func3, 9, 8, "7", key6="six", key5=5)
+        x.run()
+        func1.assertInvocation(1, 2, "3")
+        func2.assertInvocation(key1="value1", key2=2)
+        func3.assertInvocation(9, 8, "7", key6="six", key5=5)
+
+    def test_context_manager(self):
+        func1 = self.func("London")
+        func2 = self.func("Mississauga")
+        with Cleanups() as x:
+            x.add(func1)
+            func1.assertNotInvoked()
+            x.add(func2)
+            func2.assertNotInvoked()
+        func1.assertInvocation()
+        func2.assertInvocation()
 
 ################################################################################
 
@@ -18,10 +106,271 @@ class TestCleanupListener(CleanupsTestCase):
     """
 
     def test(self):
-        x = cleanups.CleanupListener()
+        x = CleanupListener()
         self.assertIsNone(x.starting(None, None))
         self.assertIsNone(x.completed(None, None, None))
         self.assertIsNone(x.failed(None, None, None))
 
 if __name__ == "__main__":
     unittest.main()
+
+################################################################################
+
+class FunctionInvocation():
+    """
+    Stores information about a method invocation.
+    """
+
+    def __init__(self, testcase, func, args, kwargs, retval, exception,
+            seqnum, func_name):
+        """
+        Initializes a new instance of ``FunctionInvocation``.
+        
+        :Parameters:
+            testcase : unittest.TestCase
+                the case case to use when assertXXX() methods are to be invoked
+            func : callable
+                the function or method that was invoked
+            args : list/tuple
+                the positional arguments that were given to the function; will
+                be converted to a tuple via ``tuple()``
+            kwargs : dict
+                the keyword arguments that were given to the function; will be
+                converted to a new dict via ``dict()``
+            retval :
+                the value that was returned from the function; the meaning of
+                this attribute if `exception` is not ``None`` is undefined
+            exception :
+                the exception that was raised by the function; ``None``
+                indicates no exception was raised
+            seqnum : int
+                a sequence number that identifies the order in which this
+                invocation occurred relative to other invocations
+            func_name : string
+                the name of the function to be used in messages
+        """
+        self.testcase = testcase
+        self.func = func
+        self.args = tuple(args)
+        self.kwargs = dict(kwargs)
+        self.retval = retval
+        self.exception = exception
+        self.seqnum = seqnum
+        self.func_name = func_name
+
+    def assertArgs(self, args, kwargs):
+        """
+        Asserts that `self.args` and `self.kwargs` are equal to the given
+        values.
+        
+        :Parameters:
+            args : iterable
+                the value to assert being equal to self.args; will be converted
+                to a tuple via ``tuple()``
+            kwargs : dict
+                the value to assert being equal to self.kwargs; will be
+                converted to a new dict via ``dict()``
+        """
+        args = tuple(args)
+        kwargs = dict(kwargs)
+        actual_str = self.create_args_string(self.args, self.kwargs)
+        expected_str = self.create_args_string(args, kwargs)
+        message = "%s was invoked with arguments (%s), but expected (%s)" % (
+            self.func_name, actual_str, expected_str)
+
+        self.testcase.assertEqual(self.args, args, message)
+        self.testcase.assertEqual(self.kwargs, kwargs, message)
+
+    def assertInvokedBefore(self, other):
+        """
+        Asserts that this invocation occurred before another invocation.  The
+        determination is done by comparing the sequence numbers, `seqnum`, of
+        the two functions; the one with the lower value is considered to have
+        been invoked before the other.
+        
+        :Parameters:
+            other : `FunctionInvocation`
+                the invocation to compare to this invocation for order
+        """
+        message = ("%s was invoked after %s, but expected the other way " +
+            "around (%i>=%i)") % (self.func_name, other.func_name, self.seqnum,
+            other.seqnum)
+        self.testcase.assertLess(self.seqnum, other.seqnum, message)
+
+    def get_args_string(self):
+        """
+        Shorthand for `create_args_string()` specified `self.args` and
+        `self.kwargs` as arguments.
+        """
+        return self.create_args_string(self.args, self.kwargs)
+
+    @staticmethod
+    def create_args_string(args, kwargs):
+        """
+        Generates a string resembling a Python method call with the given
+        arguments.
+
+        :Parameters:
+            args : tuple
+                the positional arguments of the method call
+            kwargs : dict
+                the keyword arguments of the method call
+        """
+        args_strs = ("%r" % x for x in args)
+        kwargs_strs = ("%s=%r" % (x, kwargs[x]) for x in sorted(kwargs))
+        s = ", ".join(itertools.chain(args_strs, kwargs_strs))
+        return s
+
+################################################################################
+
+class SampleCleanupOperation():
+    """
+    A class that can be used directly as a function and records all of its
+    invocations for later inspection.
+    """
+
+    COUNTER = itertools.count()
+    """A counter shared by all instances of this class, used for global ordering
+    of invocations; all access to this object should be done with the lock
+    `LOCK` acquired in order to ensure thread safety."""
+
+    COUNTER_LOCK = threading.Lock()
+    """The lock to acquire prior to any access to `COUNTER`"""
+
+    def __init__(self, testcase, retval=None, exception=None, name=None):
+        """
+        Initializes a new instance of ``SampleCleanupOperation``.
+        
+        :Parameters:
+            testcase : unittest.TestCase
+                the case case to use when assertXXX() methods are to be invoked
+            retval :
+                the value to return from `invoke()` (default: ``None``)
+            exception :
+                the exception to raise from `invoke()`; if ``None`` (the
+                default) then do not raise any exceptions from ``invoke()``
+            name : string
+                a name to assign to this object; if ``None`` (the default) then
+                a name will be created from the next sequence number returned
+                from `next_seqnum()`
+        """
+        self.invocations = []
+        self.testcase = testcase
+        self.retval = retval
+        self.exception = exception
+
+        if name is None:
+            name = "%s_%04i" % (self.__class__.__name__, self.next_seqnum())
+        self.name = name
+        self.display_name = 'cleanup operation "%s"' % name
+
+    def reset(self):
+        """
+        Clears the list of recorded invocations.
+        """
+        self.invocations = []
+
+    def invoke(self, *args, **kwargs):
+        """
+        Records an invocation of this object.  All of the given arguments and
+        a globally unique sequence number are stored in this object's invocation
+        list.  The sequence numbers are always increasing and can be used to
+        determine the total order of method invocations.
+        """
+        seqnum = self.next_seqnum()
+        retval = self.retval
+        exception = self.exception
+        invocation = FunctionInvocation(self.testcase, self.invoke, args,
+            kwargs, retval, exception, seqnum, self.display_name)
+        self.invocations.append(invocation)
+
+        if exception is not None:
+            raise exception
+
+        return retval
+
+    def assertInvoked(self):
+        """
+        Asserts that `invoke()` was invoked. 
+        """
+        message = 'cleanup operation "%s" was not invoked' % self.name
+        num_invocations = len(self.invocations)
+        self.testcase.assertTrue(num_invocations > 0, message)
+
+    def assertInvocationCount(self, expected):
+        """
+        Asserts that `invoke()` was invoked a specified number of times.
+        
+        :Parameters:
+            expected : int
+                the expected number of times for `invoke()` to have been invoked
+        """
+        actual = len(self.invocations)
+        message = "%s was invoked %i times, but expected %i" % (
+            self.display_name, actual, expected)
+        self.testcase.assertEqual(actual, expected, message)
+
+    def assertInvocation(self, *args, **kwargs):
+        """
+        Asserts that `invoke()` was invoked exactly once with the given
+        arguments. 
+        """
+        self.assertInvocationCount(1)
+        invocation = self.invocations[0]
+        invocation.assertArgs(args, kwargs)
+
+    def assertNotInvoked(self):
+        """
+        Asserts that `invoke()` was not invoked.  This method is similar
+        functionally to invoking ``self.assertInvocationCount(0)`` but has a
+        better error message in the case of failure.
+        See `assertInvocationCount()`
+        """
+        num_invocations = len(self.invocations)
+        if num_invocations > 0:
+            invocations_str = "(%s)" % ", ".join(x.get_args_string() for x in
+                self.invocations)
+            message = ("%s was invoked %i times, but expected 0 invocations: %s"
+                % (self.display_name, num_invocations, invocations_str))
+            self.testcase.fail(message)
+
+    def assertInvokedBefore(self, other):
+        """
+        Shorthand for 
+        ``self.invocations[0].assertInvokedBefore(other.invocations[0])``.
+        See `FunctionInvocation.assertInvokedBefore()`.  If one or both of this
+        ``SampleCleanupOperation`` or ``other`` do not have exactly 1 invocation
+        then AssertionError is raised. 
+        
+        :Parameters:
+            other : `SampleCleanupOperation`
+                the ``SampleCleanupOperation`` whose single invocation to ensure
+                was invoked after this object's single invocation
+        """
+        assert len(self.invocations) == 1
+        assert len(other.invocations) == 1
+        self.invocations[0].assertInvokedBefore(other.invocations[0])
+
+    @classmethod
+    def next_seqnum(cls):
+        """
+        Generates and returns the next globally-unique sequence number.  This
+        method is thread safe and may be invoked concurrently by multiple
+        threads.
+        """
+        with cls.COUNTER_LOCK:
+            return next(cls.COUNTER)
+
+    __call__ = invoke
+
+    def __str__(self):
+        return str(self.display_name)
+
+
+
+
+
+
+
+
+
