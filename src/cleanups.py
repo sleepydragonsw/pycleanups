@@ -19,12 +19,14 @@ class Cleanups():
     global_listeners = []
     global_lock = threading.Lock()
 
-    def __init__(self):
+    def __init__(self, atexit_register=True):
         self.cleanups = []
         self.listeners = []
         self.next_cleanup_id = 0
         self.lock = threading.Lock()
-        atexit.register(self.run)
+
+        if atexit_register:
+            atexit.register(self.run)
 
     def add(self, func, *args, **kwargs):
         with self.lock:
@@ -115,7 +117,7 @@ class Cleanups():
         try:
             retval = cleanup.run()
         except:
-            listeners.failed(self, cleanup, sys.exc_info())
+            listeners.failed(cleanup, sys.exc_info())
         else:
             listeners.completed(cleanup, retval)
 
