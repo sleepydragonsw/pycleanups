@@ -2,6 +2,7 @@ import itertools
 import threading
 import unittest
 
+import cleanups
 from cleanups import Cleanup
 from cleanups import Cleanups
 from cleanups import CleanupListener
@@ -135,6 +136,12 @@ class TestBasicFunctionality(CleanupsTestCase):
             listener.starting.invocations[1])
         listener.starting.invocations[1].assertInvokedBefore(func1.invocation)
         func1.invocation.assertInvokedBefore(listener.completed.invocations[1])
+
+    def test_module_attributes(self):
+        self.assertIsInstance(cleanups.cleanups, Cleanups)
+        self.assertEqual(cleanups.add, cleanups.cleanups.add)
+        self.assertEqual(cleanups.add_to_front, cleanups.cleanups.add_to_front)
+        self.assertEqual(cleanups.remove, cleanups.cleanups.remove)
 
 ################################################################################
 
