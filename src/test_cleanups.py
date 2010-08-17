@@ -16,11 +16,11 @@ class CleanupsTestCase(unittest.TestCase):
     def func(self, name, retval=None, exception=None):
         """
         A convenience function that simply creates a new instance of
-        `SampleCleanupOperation` with the given arguments.  The forcing of
+        `FunctionSimulator` with the given arguments.  The forcing of
         ``name`` as the first parameter makes it easier to locate which test
         failed based on the cleanup operation's name.
         """
-        return SampleCleanupOperation(self, name=name, retval=retval,
+        return FunctionSimulator(self, name=name, retval=retval,
             exception=exception)
 
 ################################################################################
@@ -35,7 +35,8 @@ class TestBasicFunctionality(CleanupsTestCase):
     def test_run_one(self):
         func = self.func("Toronto")
         x = Cleanups()
-        x.add(func)
+        cleanup = x.add(func)
+        self.assertIsInstance(cleanup, Cleanup)
         x.run()
         func.assertInvocation()
 
@@ -96,6 +97,44 @@ class TestBasicFunctionality(CleanupsTestCase):
             func2.assertNotInvoked()
         func1.assertInvocation()
         func2.assertInvocation()
+
+    def test_listener(self):
+        func = self.func("Brampton")
+        x = Cleanups()
+        cleanup = x.add(func)
+        listener = CleanupListenerHelper(self)
+        x.add_listener(listener)
+        x.run()
+        func.assertInvoked()
+        listener.starting.assertInvocation(listener, x, cleanup)
+        listener.completed.assertInvocation(listener, x, cleanup, None)
+        listener.failed.assertNotInvoked()
+        listener.starting.assertInvokedBefore(func)
+        func.assertInvokedBefore(listener.completed)
+
+    def test_global_listener(self):
+        func1 = self.func("Burlington")
+        func2 = self.func("Stouffville")
+        x1 = Cleanups()
+        x2 = Cleanups()
+        cleanup1 = x1.add(func1)
+        cleanup2 = x1.add(func2)
+        listener = CleanupListenerHelper(self)
+        Cleanups.add_global_listener(listener)
+        x1.run()
+        x2.run()
+        func1.assertInvoked()
+        func2.assertInvoked()
+        listener.starting.assertInvocationCount(2)
+        listener.completed.assertInvocationCount(2)
+        listener.failed.assertNotInvoked()
+
+        listener.starting.invocations[0].assertInvokedBefore(func2.invocation)
+        func2.invocation.assertInvokedBefore(listener.completed.invocations[0])
+        listener.completed.invocations[0].assertInvokedBefore(
+            listener.starting.invocations[1])
+        listener.starting.invocations[1].assertInvokedBefore(func1.invocation)
+        func1.invocation.assertInvokedBefore(listener.completed.invocations[1])
 
 ################################################################################
 
@@ -223,7 +262,7 @@ class FunctionInvocation():
 
 ################################################################################
 
-class SampleCleanupOperation():
+class FunctionSimulator():
     """
     A class that can be used directly as a function and records all of its
     invocations for later inspection.
@@ -239,7 +278,7 @@ class SampleCleanupOperation():
 
     def __init__(self, testcase, retval=None, exception=None, name=None):
         """
-        Initializes a new instance of ``SampleCleanupOperation``.
+        Initializes a new instance of ``FunctionSimulator``.
         
         :Parameters:
             testcase : unittest.TestCase
@@ -255,6 +294,7 @@ class SampleCleanupOperation():
                 from `next_seqnum()`
         """
         self.invocations = []
+        self.invocation = None
         self.testcase = testcase
         self.retval = retval
         self.exception = exception
@@ -262,13 +302,14 @@ class SampleCleanupOperation():
         if name is None:
             name = "%s_%04i" % (self.__class__.__name__, self.next_seqnum())
         self.name = name
-        self.display_name = 'cleanup operation "%s"' % name
+        self.display_name = 'function "%s"' % name
 
     def reset(self):
         """
         Clears the list of recorded invocations.
         """
         self.invocations = []
+        self.invocation = None
 
     def invoke(self, *args, **kwargs):
         """
@@ -283,6 +324,7 @@ class SampleCleanupOperation():
         invocation = FunctionInvocation(self.testcase, self.invoke, args,
             kwargs, retval, exception, seqnum, self.display_name)
         self.invocations.append(invocation)
+        self.invocation = invocation
 
         if exception is not None:
             raise exception
@@ -293,7 +335,7 @@ class SampleCleanupOperation():
         """
         Asserts that `invoke()` was invoked. 
         """
-        message = 'cleanup operation "%s" was not invoked' % self.name
+        message = 'function "%s" was not invoked' % self.name
         num_invocations = len(self.invocations)
         self.testcase.assertTrue(num_invocations > 0, message)
 
@@ -316,8 +358,7 @@ class SampleCleanupOperation():
         arguments. 
         """
         self.assertInvocationCount(1)
-        invocation = self.invocations[0]
-        invocation.assertArgs(args, kwargs)
+        self.invocation.assertArgs(args, kwargs)
 
     def assertNotInvoked(self):
         """
@@ -339,17 +380,17 @@ class SampleCleanupOperation():
         Shorthand for 
         ``self.invocations[0].assertInvokedBefore(other.invocations[0])``.
         See `FunctionInvocation.assertInvokedBefore()`.  If one or both of this
-        ``SampleCleanupOperation`` or ``other`` do not have exactly 1 invocation
+        ``FunctionSimulator`` or ``other`` do not have exactly 1 invocation
         then AssertionError is raised. 
         
         :Parameters:
-            other : `SampleCleanupOperation`
-                the ``SampleCleanupOperation`` whose single invocation to ensure
+            other : `FunctionSimulator`
+                the ``FunctionSimulator`` whose single invocation to ensure
                 was invoked after this object's single invocation
         """
-        assert len(self.invocations) == 1
-        assert len(other.invocations) == 1
-        self.invocations[0].assertInvokedBefore(other.invocations[0])
+        assert self.invocation is not None
+        assert other.invocation is not None
+        self.invocation.assertInvokedBefore(other.invocation)
 
     @classmethod
     def next_seqnum(cls):
@@ -366,7 +407,20 @@ class SampleCleanupOperation():
     def __str__(self):
         return str(self.display_name)
 
+################################################################################
 
+class CleanupListenerHelper():
+    """
+    An implementation of `CleanupListener` that records the invocation of the
+    listener methods.
+    """
+
+    def __init__(self, testcase):
+        self.starting = FunctionSimulator(testcase, name="starting")
+        self.completed = FunctionSimulator(testcase, name="completed")
+        self.failed = FunctionSimulator(testcase, name="failed")
+
+################################################################################
 
 
 
