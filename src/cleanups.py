@@ -242,19 +242,20 @@ class _CleanupListenerNotifier():
         self.listeners = listeners
 
     def starting(self, cleanup):
-        return self.dispatch_notifications(CleanupListener.starting, cleanup)
+        return self.dispatch_notifications(lambda x: x.starting, cleanup)
 
     def completed(self, cleanup, retval):
-        return self.dispatch_notifications(CleanupListener.completed, cleanup,
+        return self.dispatch_notifications(lambda x: x.completed, cleanup,
             retval)
 
     def failed(self, cleanup, exc_info):
-        return self.dispatch_notifications(CleanupListener.failed, cleanup,
+        return self.dispatch_notifications(lambda x: x.failed, cleanup,
             exc_info)
 
-    def dispatch_notifications(self, func, *args):
+    def dispatch_notifications(self, get_func_from_listener, *args):
         for listener in self.listeners:
             try:
+                func = get_func_from_listener(listener)
                 func(listener, self.cleanups, *args)
             except:
                 traceback.print_exc()
