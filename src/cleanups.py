@@ -121,8 +121,6 @@ class Cleanups():
         else:
             listeners.completed(cleanup, retval)
 
-Cleanups.instance = Cleanups()
-
 ################################################################################
 
 class Cleanup():
@@ -262,6 +260,7 @@ class _CleanupListenerNotifier():
 
 ################################################################################
 
-add = Cleanups.instance.add
-add_to_front = Cleanups.instance.add_to_front
-remove = Cleanups.instance.remove
+cleanups = Cleanups()
+add = cleanups.add
+add_to_front = cleanups.add_to_front
+remove = cleanups.remove
