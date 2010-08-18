@@ -114,12 +114,15 @@ class Cleanups():
 
     def _execute_cleanup(self, cleanup, listeners):
         listeners.starting(cleanup)
-        try:
-            retval = cleanup.run()
-        except:
-            listeners.failed(cleanup, sys.exc_info())
-        else:
-            listeners.completed(cleanup, retval)
+        if not cleanup.executed:
+            try:
+                retval = cleanup.run()
+            except:
+                listeners.failed(cleanup, sys.exc_info())
+            else:
+                listeners.completed(cleanup, retval)
+            finally:
+                cleanup.executed = True
 
 ################################################################################
 
@@ -131,6 +134,7 @@ class Cleanup():
         self.args = args
         self.kwargs = kwargs
         self.name = None
+        self.executed = False
 
     def run(self):
         return self.func(*self.args, **self.kwargs)
