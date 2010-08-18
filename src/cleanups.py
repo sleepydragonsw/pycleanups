@@ -96,7 +96,7 @@ class Cleanups():
     def _new_cleanup(self, func, args, kwargs):
         # ASSERTION: thread must have acquired self.lock
         self.next_cleanup_id += 1
-        return Cleanup(self.next_cleanup_id, func, args, kwargs)
+        return Cleanup(self, self.next_cleanup_id, func, args, kwargs)
 
     def _get_cleanups_and_listeners_for_execution(self):
         with self.lock:
@@ -113,38 +113,85 @@ class Cleanups():
         return (cleanups, listeners)
 
     def _execute_cleanup(self, cleanup, listeners):
-        listeners.starting(cleanup)
-        if not cleanup.executed:
+        if not listeners.starting(cleanup):
             try:
                 retval = cleanup.run()
             except:
                 listeners.failed(cleanup, sys.exc_info())
             else:
                 listeners.completed(cleanup, retval)
-            finally:
-                cleanup.executed = True
 
 ################################################################################
 
 class Cleanup():
+    """
+    Stores information about a cleanup operation.
+    """
 
-    def __init__(self, id, func, args, kwargs):
+    def __init__(self, cleanups, id, func, args, kwargs):
+        """
+        Initializes a new instance of ``Cleanup``.
+        
+        :Parameters:
+            cleanups : `Cleanups`
+                the ``Cleanups`` object that is creating this object
+            id : int
+                the ID of this cleanup, as assigned by the `Cleanups` object
+                creating it
+            func : callable
+                the function to execute
+            args : iterable
+                the positional arguments to specify when invoking ``func``;
+                will be converted to a tuple using the ``tuple()`` function and
+                the tuple will be stored in the attributes of this object
+            kwargs : dict
+                will be converted to a dict using the ``dict()`` function and
+                the dict will be stored in the attributes of this object
+        """
+
+        self.cleanups = cleanups
+        """The `Cleanups` object to which this object belongs."""
+
         self.id = id
+        """An integer whose value is the ID of this cleanup; initialized to the
+        value of the ``id`` parameter in `__init__()`"""
+
         self.func = func
-        self.args = args
-        self.kwargs = kwargs
+        """A callable whose value is the function of this cleanup; initialized
+        to the value of the ``func`` parameter in `__init__()`"""
+
+        self.args = tuple(args)
+        """A tuple whose value is the positional argument to specify to `func`;
+        initialized to the value of the ``args`` parameter in `__init__()`"""
+
+        self.kwargs = dict(kwargs)
+        """A dict whose value is the keyword argument to specify to `func`;
+        initialized to the value of the ``kwargs`` parameter in `__init__()`"""
+
         self.name = None
-        self.executed = False
+        """A string whose value is a name for this cleanup; initialized to
+        ``None`` in `__init__()`; it may be assigned to another value after
+        creation for debugging purposes"""
 
     def run(self):
+        """
+        Executes this cleanup.  Invokes `self.func` with positional arguments
+        `self.args` and keyword arguments `self.kwargs`, returning whatever the
+        function returns or raising whatever it raises.
+        """
         return self.func(*self.args, **self.kwargs)
 
     def __str__(self):
+        """
+        Generates and returns a string representation of this object.  If
+        `self.name` is not ``None`` then returns `self.id` followed by
+        `self.name`; otherwise, just returns `self.id`
+        """
         name = self.name
         if name is not None:
-            return "%i: %s" % (self.id, name)
+            return "%s: %s" % (self.id, name)
         else:
-            return "%i" % self.id
+            return "%s" % self.id
 
     __call__ = run
 
@@ -166,6 +213,9 @@ class CleanupListener():
         """
         Invoked before a cleanup operation begins.
         See `Cleanups.run()` for details.
+        If the return value evaluates to ``True`` then the cleanup will *not*
+        be executed by the `Cleanups` calling this method, effectively skipping
+        it.
         
         :Parameters:
             cleanups : `Cleanups`
@@ -255,12 +305,15 @@ class _CleanupListenerNotifier():
             exc_info)
 
     def dispatch_notifications(self, get_func_from_listener, *args):
+        result = False
         for listener in self.listeners:
             try:
                 func = get_func_from_listener(listener)
-                func(listener, self.cleanups, *args)
+                if func(listener, self.cleanups, *args):
+                    result = True
             except:
                 traceback.print_exc()
+        return result
 
 ################################################################################
 
