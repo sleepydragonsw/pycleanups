@@ -162,6 +162,88 @@ if __name__ == "__main__":
 
 ################################################################################
 
+class TestCleanup(CleanupsTestCase):
+    """Tests the Cleanup class"""
+
+    def test__init__(self):
+        cleanups = Cleanups()
+        id = 5
+        retval = [1, 2, 3]
+        func = FunctionSimulator(self, retval=retval, name="Vaughn")
+        args = ["A", "b", "C"]
+        kwargs = [("d", "D"), ("z", "A")]
+        x = Cleanup(cleanups, id, func, args, kwargs)
+
+        self.assertIs(x.cleanups, cleanups)
+        self.assertEquals(x.id, id)
+        self.assertIs(x.func, func)
+        self.assertEquals(x.args, tuple(args))
+        self.assertIsInstance(x.args, tuple)
+        self.assertEquals(x.kwargs, dict(kwargs))
+        self.assertIsInstance(x.kwargs, dict)
+        self.assertIsNone(x.name)
+
+        with self.assertRaises(TypeError):
+            Cleanup(cleanups, id, func, 5, kwargs)
+        with self.assertRaises(TypeError):
+            Cleanup(cleanups, id, func, [], 5)
+
+    def test__str__(self):
+        x = Cleanup(None, 20, None, (), {})
+        self.assertEqual(str(x), "20")
+        x.name = "Scarborough"
+        self.assertEqual(str(x), "20: Scarborough")
+        x.id = 5
+        self.assertEqual(str(x), "5: Scarborough")
+        x.id = None
+        self.assertEqual(str(x), "None: Scarborough")
+        x.name = None
+        self.assertEqual(str(x), "None")
+
+    def test__call__(self):
+        self.assertEqual(Cleanup.run, Cleanup.__call__)
+
+    def test_run_normal(self):
+        func = FunctionSimulator(self, retval=450, name="York")
+        args = ()
+        kwargs = {}
+        x = Cleanup(None, 0, func, args, kwargs)
+        actual_retval = x.run()
+        func.assertInvocation()
+        self.assertEqual(actual_retval, func.retval)
+
+        actual_retval = x.run()
+        func.assertInvocationCount(2)
+        self.assertEqual(actual_retval, func.retval)
+
+    def test_run_exception(self):
+        exception = KeyError("message")
+        func = FunctionSimulator(self, exception=exception, name="Etobicoke")
+        args = ()
+        kwargs = {}
+        x = Cleanup(None, 0, func, args, kwargs)
+        with self.assertRaises(type(func.exception)) as cm:
+            x.run()
+        self.assertIs(cm.exception, func.exception)
+
+        with self.assertRaises(type(func.exception)) as cm:
+            x.run()
+        func.assertInvocationCount(2)
+        self.assertIs(cm.exception, func.exception)
+
+    def test_run_args(self):
+        func = FunctionSimulator(self, name="Acton")
+        args = (1, 2)
+        kwargs = {"a": 1, "b": 2, "c": 3}
+        x = Cleanup(None, 0, func, args, kwargs)
+        x.run()
+        func.assertInvocation(*args, **kwargs)
+        x.run()
+        func.assertInvocationCount(2)
+        func.invocations[1].assertArgs(*args, **kwargs)
+
+################################################################################
+
 class FunctionInvocation():
     """
     Stores information about a method invocation.
@@ -204,21 +286,11 @@ class FunctionInvocation():
         self.seqnum = seqnum
         self.func_name = func_name
 
-    def assertArgs(self, args, kwargs):
+    def assertArgs(self, *args, **kwargs):
         """
         Asserts that `self.args` and `self.kwargs` are equal to the given
-        values.
-        
-        :Parameters:
-            args : iterable
-                the value to assert being equal to self.args; will be converted
-                to a tuple via ``tuple()``
-            kwargs : dict
-                the value to assert being equal to self.kwargs; will be
-                converted to a new dict via ``dict()``
+        positional arguments and keyword arguments.
         """
-        args = tuple(args)
-        kwargs = dict(kwargs)
         actual_str = self.create_args_string(self.args, self.kwargs)
         expected_str = self.create_args_string(args, kwargs)
         message = "%s was invoked with arguments (%s), but expected (%s)" % (
@@ -262,7 +334,7 @@ class FunctionInvocation():
             kwargs : dict
                 the keyword arguments of the method call
         """
-        args_strs = ("%r" % x for x in args)
+        args_strs = (repr(x) for x in args)
         kwargs_strs = ("%s=%r" % (x, kwargs[x]) for x in sorted(kwargs))
         s = ", ".join(itertools.chain(args_strs, kwargs_strs))
         return s
@@ -365,7 +437,7 @@ class FunctionSimulator():
         arguments. 
         """
         self.assertInvocationCount(1)
-        self.invocation.assertArgs(args, kwargs)
+        self.invocation.assertArgs(*args, **kwargs)
 
     def assertNotInvoked(self):
         """
