@@ -16,7 +16,19 @@ operation, execute cleanup operations at any time, and listen for events
 pertaining to the execution of cleanup operations.
 
 ================================================================================
-2. INSTALLATION
+3. REQUIREMENTS
+================================================================================
+
+PyCleanups is written in pure Python in the Python 3 format.  Therefore, the
+only requirement to use PyCleanups is a Python 3 interpreter.  The standard
+Python 3 interpreter can be freely downloaded from http://python.org.
+
+Note that it is quite simple to port PyCleanups to Python 2.x as very few
+features specified Python 3 are used.  In fact, once the work for Python 3 is
+completed the author plans to release versions for Python 2.5, 2.6, and 2.7.
+
+================================================================================
+3. INSTALLATION
 ================================================================================
 
 PyCleanups uses the standard distutils setup script which can be used to install
@@ -25,7 +37,7 @@ it.  Simply run the following command from a command line:
     python setup.py install
 
 ================================================================================
-3. USAGE
+4. USAGE
 ================================================================================
 
 To use the PyCleanups library include the following line prior to using any
