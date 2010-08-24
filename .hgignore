@@ -1,0 +1,8 @@
+syntax: regexp
+
+# artifacts produced by setup.py "dist" commands (eg. sdist, bdist_wininst)
+^pycleanups/build
+^pycleanups/dist
+
+# VIM swap files (temporary files deleted when corresponding file is closed)
+\.swp$
