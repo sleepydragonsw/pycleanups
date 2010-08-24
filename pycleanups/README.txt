@@ -1,5 +1,5 @@
 PyCleaups
-By: Denver Coneybeare
+By: Denver Coneybeare <denver.coneybeare@gmail.com>
 August 24, 2010
 
 ================================================================================
