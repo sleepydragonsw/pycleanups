@@ -22,7 +22,7 @@ from distutils.core import setup
 
 setup(
     name="cleanups",
-    py_modules="cleanups",
+    py_modules=["cleanups"],
     version="1.0.0a1",
     description="A handy little Python library for registering and executing cleanup code",
     author="Denver Coneybeare",
