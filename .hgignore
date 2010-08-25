@@ -6,3 +6,9 @@ syntax: regexp
 
 # VIM swap files (temporary files deleted when corresponding file is closed)
 \.swp$
+
+# Eclipse files
+^.metadata
+^pycleanups/.project
+^pycleanups/.pydevproject
+^pycleanups/__pycache__
