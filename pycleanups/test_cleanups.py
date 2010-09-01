@@ -18,14 +18,20 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
 
+import io
 import itertools
+import sys
+import tempfile
 import threading
+import traceback
 import unittest
+
 
 import cleanups
 from cleanups import Cleanup
 from cleanups import Cleanups
 from cleanups import CleanupListener
+from cleanups import DebugCleanupListener
 
 ################################################################################
 
@@ -43,6 +49,14 @@ class CleanupsTestCase(unittest.TestCase):
         """
         return FunctionSimulator(self, name=name, retval=retval,
             exception=exception)
+
+    def tempfile(self):
+        """
+        Creates and opens a temporary file and returns it.
+        """
+        f = tempfile.TemporaryFile(mode="wt")
+        self.addCleanup(f.close)
+        return f
 
 ################################################################################
 
@@ -177,8 +191,74 @@ class TestCleanupListener(CleanupsTestCase):
         self.assertIsNone(x.completed(None, None, None))
         self.assertIsNone(x.failed(None, None, None))
 
-if __name__ == "__main__":
-    unittest.main()
+################################################################################
+
+class TestDebugCleanupListener(CleanupsTestCase):
+    """
+    Tests the DebugCleanupListener class.
+    """
+
+    def test__init__(self):
+        x = DebugCleanupListener()
+        self.assertIs(x.f, sys.__stderr__)
+        x = DebugCleanupListener(f=sys.stdout)
+        self.assertIs(x.f, sys.stdout)
+
+    def test_inheritence(self):
+        x = DebugCleanupListener()
+        self.assertIsInstance(x, CleanupListener)
+
+    def test_starting(self):
+        x = DebugCleanupListener(f=self.tempfile())
+        self.assertIsNone(x.starting(None, None))
+        x.log = FunctionSimulator(self, name="log")
+        cleanups = Cleanups()
+        cleanup = Cleanup(cleanups, 123, None, [], {})
+        x.starting(cleanups, cleanup)
+        x.log.assertInvocation("Starting cleanup operation: 123")
+
+    def test_completed(self):
+        x = DebugCleanupListener(f=self.tempfile())
+        self.assertIsNone(x.completed(None, None, None))
+        x.log = FunctionSimulator(self, name="log")
+        cleanups = Cleanups()
+        cleanup = Cleanup(cleanups, 234, None, [], {})
+        x.completed(cleanups, cleanup, "abc")
+        x.log.assertInvocation("Cleanup operation completed successfully: " +
+            "234 (returned 'abc')")
+
+    def test_failed(self):
+        self.set_traceback_print_exception_to_simulator()
+        x = DebugCleanupListener(f=self.tempfile())
+        self.assertIsNone(x.failed(None, None, [1, 2, 3]))
+        x.log = FunctionSimulator(self, name="log")
+        cleanups = Cleanups()
+        cleanup = Cleanup(cleanups, 345, None, [], {})
+        exc_info = (6, 7, 8)
+        traceback.print_exception.reset()
+        x.failed(cleanups, cleanup, exc_info)
+        x.log.assertInvocation("Cleanup operation FAILED: 345 (7)")
+        traceback.print_exception.assertInvocation(*exc_info)
+
+    def test_log(self):
+        out = io.StringIO()
+        message = "This is a test message"
+        print(message, file=out)
+        expected_log_message = out.getvalue()
+
+        x = DebugCleanupListener(f=io.StringIO())
+        x.log(message)
+        self.assertEqual(x.f.getvalue(), expected_log_message)
+
+    def set_traceback_print_exception_to_simulator(self):
+        def set_print_exception(value):
+            print_exception_orig = traceback.print_exception
+            traceback.print_exception = value
+            return print_exception_orig
+
+        orig_print_exception = set_print_exception(FunctionSimulator(self,
+            name="traceback.print_exception"))
+        self.addCleanup(set_print_exception, orig_print_exception)
 
 ################################################################################
 
@@ -521,9 +601,5 @@ class CleanupListenerHelper():
 
 ################################################################################
 
-
-
-
-
-
-
+if __name__ == "__main__":
+    unittest.main()
