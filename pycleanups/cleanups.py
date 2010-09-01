@@ -287,9 +287,25 @@ class CleanupListener():
 ################################################################################
 
 class DebugCleanupListener(CleanupListener):
+    """
+    An implementation of ``CleanupListener`` that prints messages to standard
+    error on each event.  It may be useful to register this listener to
+    understand what is going on when cleanups are executed.  The `log()` method
+    can be overridden to log the messages in a different way.
+    """
 
     def __init__(self, f=None):
+        """
+        Initializes a new instance of ``DebugCleanupListener``
+        
+        :Parameters:
+            f : file
+                the file to which log output is written; may be ``None``
+                (the default) to log to standard error, ``sys.__stderr__``
+        """
+
         self.f = f if f is not None else sys.__stderr__
+        """A file object to which the log output is written"""
 
     def starting(self, cleanups, cleanup):
         self.log("Starting cleanup operation: %s" % cleanup)
@@ -303,6 +319,16 @@ class DebugCleanupListener(CleanupListener):
         traceback.print_exception(*exc_info)
 
     def log(self, message):
+        """
+        Logs a message.  The implementation of this method in this class invokes
+        ``print()`` with the given message and writes to the file in the
+        `self.f` attribute.  Subclasses may override this method to perform
+        custom logging.
+        
+        :Parameters:
+            message : string
+                the message to log
+        """
         print(message, file=self.f)
 
 ################################################################################
